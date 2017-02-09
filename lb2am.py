@@ -1,3 +1,4 @@
+# coding=<utf-8>
 # lb2am.py - https://github.com/sharkusk/lb2am
 # Copyright (C) 2017 - Marcus Kellerman
 #
@@ -22,25 +23,7 @@ import glob
 import shutil
 import codecs
 
-parser = argparse.ArgumentParser()
-parser.add_argument('Launchbox_dir', help="Base Directory of Launchbox")
-parser.add_argument('AttractMode_dir', help="Base Directory of AttractMode")
-parser.add_argument('--genroms', action="store_true", help="Generate AttractMode romlists from Launchbox data.")
-parser.add_argument('--genplats', action="store_true", help="Generate AttractMode platforms from Launchbox data.")
-parser.add_argument('--renart', action="store_true", help="Rename artwork in Launchbox to be compatible with AttractMode.  Only the first image for each game in each directory will be renamed.")
-parser.add_argument('--mergeart', action="store_true", help="Move missing artwork from AttractMode's scraper directory to Launchbox directories.")
-parser.add_argument('--dryrun', action="store_true", help="Don't modify or create any files, only print operations that will be performed.")
-parser.add_argument('--verbose', action="store_true", help="Dump the romlist and platform files to the console.")
-parser.add_argument('--rlauncher', default='', help="Specify RocketLauncher executable, emulators are generated using RocketLauncher settings.")
-parser.add_argument('-e', '--romext', default='.smc;.zip;.7z;.nes;.gba;.gb;.rom;.a26;.lnx;.gg;.int;.sms;.nds;.pce;.cue;.pbp;.iso;.cso;.32x;.bin;.rar;.dsk;.mx2;.lha;.n64;.wud;.wux;.rpx;.cdi;.adf;.d64;.t64',
-        help="Override default rom extention (separated by ';')")
-# TODO Create platform specific rom extensions
-# TODO Specify single platform
-# TODO Pick absolute or relative paths to be used
-# TODO Overwrite, update or skip if file exists
-
-args = parser.parse_args()
-
+# Global variable used by lamba
 EmulatorName = ''
 
 AM_HEADER = "#Name;Title;Emulator;CloneOf;Year;Manufacturer;Category;Players;Rotation;Control;Status;DisplayCount;DisplayType;AltRomname;AltTitle;Extra;Buttons"
@@ -103,22 +86,27 @@ def ConvertToAMRomlist( LBPlatformFilePath ):
 
     return output
 
-def CreateRomlists( LaunchboxBaseDir, AttractModeBaseDir ):
-    platformsdir = os.path.join(LaunchboxBaseDir, 'Data', 'Platforms')
-    romlistsdir = os.path.join(AttractModeBaseDir, 'romlists')
-
+def GetLbPlatformFiles( LaunchBoxBaseDir ):
+    platformsdir = os.path.join(LaunchBoxBaseDir, 'Data', 'Platforms')
     # LB stores roms in individual xml files named after the platform
-    files = glob.glob(os.path.join(platformsdir,"*.xml"))
+    return glob.glob(os.path.join(platformsdir,"*.xml"))
+
+def LbFilenameToPlatformName( filename ):
+    return os.path.splitext(os.path.split(filename)[1])[0] # Use platform filename as emulator name
+
+def CreateRomlists( LaunchBoxBaseDir, AttractModeBaseDir ):
+    romlistsdir = os.path.join(AttractModeBaseDir, 'romlists')
+    files = GetLbPlatformFiles(LaunchBoxBaseDir)
     for file in files:
         print("Extracting ROMS from: "+file)
         # We use EmulatorName in a lamba, which needs to be global
         global EmulatorName
-        EmulatorName = os.path.splitext(os.path.split(file)[1])[0] # Use platform filename as emulator name
+        EmulatorName = LbFilenameToPlatformName(file)
         # LB may use unicode characters, so encode accordingly
         romListFileName = os.path.join(romlistsdir,EmulatorName+'.txt')
         output = ConvertToAMRomlist(file)
+        print( ("Creating romlist: "+romListFileName).encode('utf-8') )
         if args.dryrun or args.verbose:
-            print( ("Creating romlist: "+romListFileName).encode('utf-8') )
             if args.verbose:
                 print( output.encode('utf-8') )
                 print('')
@@ -316,11 +304,35 @@ def MergeArtworkToLB( LaunchboxBaseDir, AttractModeBaseDir ):
                 else:
                     shutil.move(image, newPath)
 
-if args.genroms:
-    CreateRomlists( args.Launchbox_dir, args.AttractMode_dir )
-if args.genplats:
-    CreateAmEmulators( args.Launchbox_dir, args.AttractMode_dir )
-if args.renart:
-    RenameLBArtwork( args.Launchbox_dir, args.AttractMode_dir )
-if args.mergeart:
-    MergeArtworkToLB( args.Launchbox_dir, args.AttractMode_dir )
+def main():
+    parser = argparse.ArgumentParser(fromfile_prefix_chars='_')
+    parser.add_argument('Launchbox_dir', help="Base Directory of Launchbox")
+    parser.add_argument('AttractMode_dir', help="Base Directory of AttractMode")
+    parser.add_argument('--genroms', action="store_true", help="Generate AttractMode romlists from Launchbox data.")
+    parser.add_argument('--genplats', action="store_true", help="Generate AttractMode platforms from Launchbox data.")
+    parser.add_argument('--renart', action="store_true", help="Rename artwork in Launchbox to be compatible with AttractMode.  Only the first image for each game in each directory will be renamed.")
+    parser.add_argument('--mergeart', action="store_true", help="Move missing artwork from AttractMode's scraper directory to Launchbox directories.")
+    parser.add_argument('--dryrun', action="store_true", help="Don't modify or create any files, only print operations that will be performed.")
+    parser.add_argument('--verbose', action="store_true", help="Dump the romlist and platform files to the console.")
+    parser.add_argument('--rlauncher', default='', help="Specify RocketLauncher executable, emulators are generated using RocketLauncher settings.")
+    parser.add_argument('--romext', default='.smc;.zip;.7z;.nes;.gba;.gb;.rom;.a26;.lnx;.gg;.int;.sms;.nds;.pce;.cue;.pbp;.iso;.cso;.32x;.bin;.rar;.dsk;.mx2;.lha;.n64;.wud;.wux;.rpx;.cdi;.adf;.d64;.t64',
+            help="Override default rom extention (separated by ';')")
+
+    # TODO Create platform specific rom extensions
+    # TODO Specify single platform
+    # TODO Pick absolute or relative paths to be used
+    # TODO Overwrite, update or skip if file exists
+
+    args = parser.parse_args()
+
+    if args.genroms:
+        CreateRomlists( args.Launchbox_dir, args.AttractMode_dir )
+    if args.genplats:
+        CreateAmEmulators( args.Launchbox_dir, args.AttractMode_dir )
+    if args.renart:
+        RenameLBArtwork( args.Launchbox_dir, args.AttractMode_dir )
+    if args.mergeart:
+        MergeArtworkToLB( args.Launchbox_dir, args.AttractMode_dir )
+
+if __name__ == '__main__':
+    main()
