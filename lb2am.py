@@ -47,8 +47,6 @@ AM_FIELD_MAP = [
     { "LB_Field": None,                 "AM_Field": "Buttons",      "MapToAm": None }, ]
 
 def ConvertToAMRomlist( LBPlatformFilePath ):
-    # import pdb; pdb.set_trace()
-
     output = ''
 
     tree = ET.parse(LBPlatformFilePath)
@@ -94,7 +92,7 @@ def GetLbPlatformFiles( LaunchBoxBaseDir ):
 def LbFilenameToPlatformName( filename ):
     return os.path.splitext(os.path.split(filename)[1])[0] # Use platform filename as emulator name
 
-def CreateRomlists( LaunchBoxBaseDir, AttractModeBaseDir ):
+def CreateRomlists( LaunchBoxBaseDir, AttractModeBaseDir, dryrun=False, verbose=False ):
     romlistsdir = os.path.join(AttractModeBaseDir, 'romlists')
     files = GetLbPlatformFiles(LaunchBoxBaseDir)
     for file in files:
@@ -106,8 +104,8 @@ def CreateRomlists( LaunchBoxBaseDir, AttractModeBaseDir ):
         romListFileName = os.path.join(romlistsdir,EmulatorName+'.txt')
         output = ConvertToAMRomlist(file)
         print( ("Creating romlist: "+romListFileName).encode('utf-8') )
-        if args.dryrun or args.verbose:
-            if args.verbose:
+        if dryrun or verbose:
+            if verbose:
                 print( output.encode('utf-8') )
                 print('')
         else:
@@ -144,7 +142,7 @@ AM_IMAGES = {
 
 AM_IMAGE_REGIONS = [ "United States", "North America", "Europe", "Japan", ]
 
-def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir ):
+def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir, dryrun=False, verbose=False ):
     tree = ET.parse(os.path.join(LaunchboxBaseDir, 'Data', 'Emulators.xml'))
     root = tree.getroot()
 
@@ -220,9 +218,9 @@ def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir ):
 
             platformFileName = os.path.join(AttractModeBaseDir,'emulators',platformName+'.cfg')
 
-            if args.dryrun or args.verbose:
+            if dryrun or verbose:
                 print( ("Writing emulator file: "+platformFileName).encode('utf-8') )
-                if args.verbose:
+                if verbose:
                     print( output.encode('utf-8') )
                     print('')
             else:
@@ -230,7 +228,7 @@ def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir ):
                     fout.write(output)
                     fout.close()
 
-def RenameLBArtwork( LaunchboxBaseDir, AttractModeBaseDir ):
+def RenameLBArtwork( LaunchboxBaseDir, AttractModeBaseDir, dryrun=False, verbose=False ):
     romlistsdir = os.path.join(AttractModeBaseDir, 'romlists')
 
     files = glob.glob(os.path.join(romlistsdir,"*.txt"))
@@ -273,10 +271,14 @@ def RenameLBArtwork( LaunchboxBaseDir, AttractModeBaseDir ):
                 ext = os.path.splitext(image)[1]
                 # Remove the old filename (keep the path), then append the new filename and old extension
                 newImage = os.path.join(os.path.split(image)[0],gameFileName+ext)
-                if args.dryrun:
+                if dryrun:
                     print( ("Renaming "+image+" to "+newImage).encode('utf-8') )
                 else:
-                    os.rename(image,newImage)
+                    try:
+                        os.rename(image,newImage)
+                    except:
+                        print( ("Error when renaming " +image+" to "+newImage).encode('utf-8') )
+
 
 AM_TO_LB_ART_PATH = [
         ( os.path.join("scraper","%(platformName)s","flyer"),   os.path.join("Images","%(platformName)s","Box - Front") ),
@@ -284,7 +286,7 @@ AM_TO_LB_ART_PATH = [
         ( os.path.join("scraper","%(platformName)s","wheel"),   os.path.join("Images","%(platformName)s","Clear Logo") ),
         ( os.path.join("scraper","%(platformName)s","fanart"),  os.path.join("Images","%(platformName)s","Fanart - Background") ),
     ]
-def MergeArtworkToLB( LaunchboxBaseDir, AttractModeBaseDir ):
+def MergeArtworkToLB( LaunchboxBaseDir, AttractModeBaseDir, dryrun=False, verbose=False ):
     # import pdb; pdb.set_trace()
     # Get list of directories in AM's scraper directory
     amScraperPlats = next(os.walk(os.path.join(AttractModeBaseDir, 'scraper')))[1]
@@ -299,7 +301,7 @@ def MergeArtworkToLB( LaunchboxBaseDir, AttractModeBaseDir ):
                 if os.path.isfile( newPath ):
                     # File already exists, so we can move to the next one
                     continue
-                if args.dryrun:
+                if dryrun:
                     print( ("Moving "+image+" to "+newPath).encode('utf-8') )
                 else:
                     shutil.move(image, newPath)
@@ -326,13 +328,13 @@ def main():
     args = parser.parse_args()
 
     if args.genroms:
-        CreateRomlists( args.Launchbox_dir, args.AttractMode_dir )
+        CreateRomlists( args.Launchbox_dir, args.AttractMode_dir, args.dryrun, args.verbose )
     if args.genplats:
-        CreateAmEmulators( args.Launchbox_dir, args.AttractMode_dir )
+        CreateAmEmulators( args.Launchbox_dir, args.AttractMode_dir, args.dryrun, args.verbose )
     if args.renart:
-        RenameLBArtwork( args.Launchbox_dir, args.AttractMode_dir )
+        RenameLBArtwork( args.Launchbox_dir, args.AttractMode_dir, args.dryrun, args.verbose )
     if args.mergeart:
-        MergeArtworkToLB( args.Launchbox_dir, args.AttractMode_dir )
+        MergeArtworkToLB( args.Launchbox_dir, args.AttractMode_dir, args.dryrun, args.verbose )
 
 if __name__ == '__main__':
     main()

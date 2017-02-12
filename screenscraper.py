@@ -1,4 +1,4 @@
-# coding=<utf-8>
+# -*- coding: utf-8 -*-
 # screenscraper.py - https://github.com/sharkusk/lb2am
 # Copyright (C) 2017 - Marcus Kellerman
 #
@@ -21,6 +21,7 @@ import os
 import urllib2, urllib
 import binascii
 import zipfile
+import zlib
 
 SS_USER_INFO_CMD = "ssuserInfos"
 SS_SYSTEMS_LIST_CMD = "systemesListe"
@@ -40,6 +41,7 @@ class ScreenScraper(object):
         self.parameters['output'] = 'xml'
         self.verbose = verbose
         self.command = None
+        self.cachedir = 'cache'
 
     def SendRequest(self):
         if not self.command:
@@ -90,14 +92,18 @@ SS_SYSTEM_XML_FILE = "screenscraper.fr-systemesListe.xml"
 
 class SystemList(ScreenScraper):
     """ This class is used to obtain the system list and associated media. """
-    def __init__(self, devid, devpassword, softname, ssid, sspassword, updateSystems=False, verbose=False):
+    def __init__(self, devid, devpassword, softname, ssid, sspassword, updateCache=False, verbose=False):
         super(SystemList, self).__init__(devid, devpassword, softname, ssid, sspassword, verbose)
-        if updateSystems or not os.path.isfile( SS_SYSTEM_XML_FILE ):
-            self.command = SS_SYSTEMS_LIST_CMD
-            f = open(SS_SYSTEM_XML_FILE, 'w')
-            f.write(self.SendRequest.encode('utf-8'))
-            f.close()
-        self.root = ET.parse(SS_SYSTEM_XML_FILE)
+
+        self.command = SS_SYSTEMS_LIST_CMD
+
+        systemXmlFile = os.path.join( self.cachedir, SS_SYSTEM_XML_FILE )
+        if updateCache or not os.path.isfile( systemXmlFile ):
+            with open(systemXmlFile, 'w') as f:
+                f.write(self.SendRequest().encode('utf-8'))
+                f.close()
+
+        self.root = ET.parse(systemXmlFile)
         if self.verbose:
             print("Created SystemList class.")
 
@@ -167,26 +173,43 @@ class SystemList(ScreenScraper):
         if system is None:
             return None
 
-        availableMedia = {'logosmonochrome':[],'wheels':[],'wheelscarbon':[],'wheelscarbonvierge':[],'photos':[],'video':[],'fanart':[],'backgrounds':[],'screenmarquees':[],'screenmarqueesvierges':[],'boxs3dvierge':[],'support2dvierge':[],'controleur':[],'illustration':[],'bezels':[]}
-
         try:
             medias = system.find('medias')
         except:
             return availableMedia
 
-        topLevelMedia = ['video','fanart',]
-        twoLevelMedia = ['bezels',]
+        return get_media(medias, self.verbose)
 
-        return get_media(medias, availableMedia, topLevelMedia, twoLevelMedia, self.verbose)
+def get_crc( romPath ):
+    # Check if there is a separate CRC file that we should use
+    if os.path.exists(romPath+'.crc'):
+        with open(romPath+'.crc', 'r') as f:
+            crc = f.read().strip()
+            f.close()
+            if not crc:
+                print("    Empty CRC file detected: %s" % romPath+'.crc')
+                crc = None 
+            else:
+                print("    Using CRC file: %s", romPath+'.crc')
+            return crc
+    else:
+        # If this is a zipfile, get the gamename and crc from inside the zip
+        if os.path.splitext(romPath)[1].lower() == '.zip':
+            zf = zipfile.ZipFile(romPath, 'r')
+            info = zf.infolist()
+            # This only works if there is one file in the zip
+            if len(info) == 1:
+                print("    Using ZIP file CRC")
+                return "%08X" % info[0].CRC
+        return crc32_from_file(romPath)
 
 class GameInfo(ScreenScraper):
     """ This class is used to obtain the game information and associated media. """
-    def __init__(self, devid, devpassword, softname, ssid, sspassword, systemId, romPath=None, romName=None, crc=None, md5=None, sha1=None, romType=None, romSize=None, verbose=False):
+    def __init__(self, devid, devpassword, softname, ssid, sspassword, systemId, romPath=None, romName=None, crc=None, md5=None, sha1=None, romType=None, romSize=None, gameTitle=None, updateCache=False, verbose=False):
         super(GameInfo, self).__init__(devid, devpassword, softname, ssid, sspassword, verbose)
 
+        # import pdb; pdb.set_trace()
         self.command = SS_GAME_INFO_CMD
-        if crc is not None:
-            self.parameters['crc'] = crc
         if md5 is not None:
             self.parameters['md5'] = md5
         if sha1 is not None:
@@ -195,41 +218,84 @@ class GameInfo(ScreenScraper):
             self.parameters['systemeid'] = systemId
         if romType is not None:
             self.parameters['romtype'] = romType
-        if romName is not None:
-            self.parameters['romnom'] = romName
         if romSize is not None:
             self.parameters['romtaille'] = romSize
 
+        gameFileName = ''
+        zipRomName = ''
+
+        cacheFileExists = False
         if romPath is not None:
             gameFileName = os.path.split(romPath)[1]
+            cacheFileName = os.path.join(self.cachedir, systemId, gameFileName) + '.xml'
+            cacheFileExists = os.path.exists(cacheFileName) 
+
             # If this is a zipfile, get the gamename and crc from inside the zip
             if os.path.splitext(romPath)[1].lower() == '.zip':
                 zf = zipfile.ZipFile(romPath, 'r')
                 info = zf.infolist()
                 # This only works if there is one file in the zip
                 if len(info) == 1:
-                    self.parameters['romnom'] = info[0].filename
-                    self.parameters['crc'] = "%08X" % info[0].CRC
-                else:
-                    self.parameters['romnom'] = gameFileName
-                    self.parameters['crc'] = crc32_from_file(romPath)
+                    romName = info[0].filename
+
+        if romName is not None:
+            self.parameters['romnom'] = romName
+        else:
+            self.parameters['romnom'] = gameFileName
+
+        self.parameters['crc'] = None
+        if crc is not None:
+            self.parameters['crc'] = crc
+        elif romPath is not None and cacheFileExists is False:
+            crc = get_crc(romPath)
+            if crc is None:
+                # If none is returned it means an empty CRC file was found, if
+                # we are not forcing updates, go ahead and report rom not found
+                if updateCache is False:
+                    raise RomNotFoundError(self.parameters['systemeid'], self.parameters['romnom'], None)
             else:
-                self.parameters['romnom'] = gameFileName
-                self.parameters['crc'] = crc32_from_file(romPath)
-
-        try:
-            xml = self.SendRequest()
-        except InvalidResponseError:
-            del self.parameters['crc']
+                self.parameters['crc'] = crc
+        
+        # Only issue a command if there is no cache file or we want to update the cache file
+        if updateCache is True or cacheFileExists is False:
             try:
-                # Retry one more time without the CRC
                 xml = self.SendRequest()
-            except InvalidResponseError as e:
-                raise RomNotFoundError(self.parameters['systemeid'], self.parameters['romnom'], e.response)
+            except InvalidResponseError:
+                # Retry without the CRC and stripped name
+                del self.parameters['crc']
+                self.parameters['romnom'] = self.parameters['romnom'].replace('[','(').split('(')[0].strip()
+                try:
+                    xml = self.SendRequest()
+                except InvalidResponseError as e:
+                    # Retry with Game Title
+                    self.parameters['romnom'] = gameTitle
+                    try:
+                        xml = self.SendRequest()
+                    except InvalidResponseError as e:
+                        with open(romPath+'.crc', 'w') as f:
+                            # Create an empty file a user can fill in with a CRC
+                            f.close()
+                        raise RomNotFoundError(self.parameters['systemeid'], self.parameters['romnom'], e.response)
 
-        self.root = ET.fromstring(xml.encode('utf-8'))
-        if self.verbose:
-            print("Created GameInfo class for %s." % self.parameters['romnom'])
+            if not os.path.exists(os.path.dirname(cacheFileName)):
+                try:
+                    os.makedirs(os.path.dirname(cacheFileName))
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+
+            with open(cacheFileName, 'w') as f:
+                f.write(xml.encode('utf-8'))
+                f.close()
+
+            self.root = ET.fromstring(xml.encode('utf-8'))
+
+            if self.verbose:
+                print("Created GameInfo class for %s." % self.parameters['romnom'])
+        else:
+            self.root = ET.parse(cacheFileName)
+            if self.verbose:
+                print("    Using cached xml file: %s." % cacheFileName)
 
     def GetAvailableMedia(self):
         """
@@ -241,9 +307,6 @@ class GameInfo(ScreenScraper):
         if self.verbose:
             print("Getting media for %s." % self.parameters['romnom'])
 
-        mediaCategories = ['screenshot','fanart','video','marquee','screenmarquee','wheels','wheelscarbon','wheelssteel','boitiers','boxs','supports','manuels',]
-        # availableMedia = {'screenshot':[],'':[],'fanart':[],'video':[],'marquee':[],'screenmarquee':[],'wheels':[],'wheelscarbon':[],'wheelssteel':[],'boitiers':[],'boxs':[],'supports':[],'manuels':[]}
-
         try:
             jue = self.root.find('jeu')
             medias = jue.find('medias')
@@ -252,10 +315,7 @@ class GameInfo(ScreenScraper):
         except:
             return None
 
-        topLevelMedia = ['screenshot','video','fanart','marquee','screenmarquee',]
-        twoLevelMedia = ['boitiers','boxs','supports',]
-
-        return get_media(medias, mediaCategories, topLevelMedia, twoLevelMedia, self.verbose)
+        return get_media(medias, self.verbose)
 
 ###############################################################################
 # EXCEPTIONS
@@ -288,64 +348,72 @@ class MediaNotFoundError(Error):
 # GLOBAL FUNCTIONS
 ###############################################################################
 
-def get_media( medias, mediaCategories, topLevelMedia=[], twoLevelMedia=[], verbose=False ):
+def get_media( medias, verbose=False ):
     availableMedia = {}
-    # Step through each type of media
-    for mediaCategory in mediaCategories:
-        # Add media_ to match screenscraper format
-        foundMedia = medias.find('media_'+mediaCategory)
-        if foundMedia is None:
-            # No media of this type found for this system
-            continue
-
-        mediaEntry = {}
-        # these doesn't have another level below it
-        if mediaCategory in twoLevelMedia:
-            for child in foundMedia:
-                mediaEntry = create_media_entry(child)
-                mediaCategory = child.tag.strip('media_')
-                if mediaCategory not in availableMedia:
-                    availableMedia[mediaCategory] = []
-                availableMedia[mediaCategory].append(mediaEntry)
-                if verbose:
-                    print("  Found %s." % mediaCategory)
-            # We already added to availableMedia, so go to next
-            continue
-        elif mediaCategory in topLevelMedia:
-            mediaEntry['url'] = foundMedia.text
-            for postfix in ['crc','md5','sha1']:
-                foundMedia = medias.find('media_'+mediaCategory+'_'+postfix)
-                if foundMedia is not None:
-                    mediaEntry[postfix] = foundMedia.text
-        else:
-            mediaEntry = create_media_entry(foundMedia)
-        if mediaCategory not in availableMedia:
-            availableMedia[mediaCategory] = []
-        availableMedia[mediaCategory].append(mediaEntry)
-        if verbose:
-            print("  Found %s." % mediaCategory)
-
+    parse_media_parent( medias, availableMedia, verbose )
     return availableMedia
 
-def create_media_entry(foundMedia):
-    mediaEntry = {}
-    for child in foundMedia:
-        # extract the postfixes from the media tag
-        # Eg. media_logomonochrome_jp_crc or media_logomonochrome_jp
-        postfixes = child.tag.split('media_')[1].split('_')
+def parse_media_parent( parent, availableMedia, verbose=False ):
+    for child in parent:
+        # Check if this child is a parent(has children) and recursively call
+        if len(child.getchildren()) > 0:
+            parse_media_parent( child, availableMedia, verbose)
+        else:
+            element = parse_media_element( child )
+            add_element_to_media( availableMedia, element, verbose )
+
+def add_element_to_media( availableMedia, element, verbose=False ):
+    # Work around for bug in xml from screen scaper, bezel names are inconsistent
+    if element['name'].find('bezel-') is not -1:
+        element['name'] = 'bezel'+element['name'].strip('bezel-')
+    if element['name'] not in availableMedia:
+        availableMedia[element['name']] = {}
+    if element['locale'] not in availableMedia[element['name']]:
+        if verbose is True:
+            print("  Found %s (%s)" % (element['name'],element['locale']))
+        availableMedia[element['name']][element['locale']] = {}
+    availableMedia[element['name']][element['locale']][element['type']] = element['text']
+
+def parse_media_element( child ):
+    """
+    Returns dictionary:
+    { 'name': 'xyz', 'type': 'crc', 'locale': 'us', 'text': 'blah...' }
+    (type can be: crc, md5, sha1, or url)
+    """
+    
+    mediaElement = {}
+    # extract the postfixes from the media tag
+    # Eg. media_logomonochrome_jp_crc or media_logomonochrome_jp
+    postfixes = child.tag.split('media_')[1].split('_')
+    name = postfixes[0]
+    locale = 'all'
+    if len(postfixes) is 1:
+        # URL has an empty postfix, it must be a URL
+        elementType = 'url'
+    elif len(postfixes) is 2:
+        # URL has one postfix, that can specify a type or be a locale + url
+        if postfixes[1] in ['crc','md5','sha1']:
+            elementType = postfixes[1]
+        else:
+            locale = postfixes[1] 
+            elementType = 'url'
+    else:
         locale = postfixes[1]
-        try:
-            entryType = postfixes[2]
-        except:
-            # URL has an empty postfix
-            entryType = 'url'
-        mediaEntry[entryType] = child.text
-    return mediaEntry
+        elementType = postfixes[2]
+    
+    mediaElement['name'] = name
+    mediaElement['type'] = elementType
+    mediaElement['locale'] = locale
+    mediaElement['text'] = child.text
+
+    return mediaElement
 
 def crc32_from_file(filename):
-    buf = open(filename,'rb').read()
-    buf = (binascii.crc32(buf) & 0xFFFFFFFF)
-    return "%08X" % buf
+    print("    Calculating CRC on %s..." % filename)
+    prev = 0
+    for eachLine in open(filename,"rb"):
+        prev = zlib.crc32(eachLine, prev)
+    return "%X"%(prev & 0xFFFFFFFF)
 
 ###############################################################################
 # BASIC TESTS
@@ -361,14 +429,16 @@ def main():
         info = ui.GetUserInfo()
 
     if test == 2:
-        sl = SystemList(settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, True)
+        sl = SystemList(settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, False, True)
         slist = sl.GetSystemList()
         info = sl.GetInfo('1')
         media = sl.GetAvailableMedia('1')
 
     if test == 3:
         try:
-            gi = GameInfo(settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, '26', 'D:/emulation/roms/a2600/Warlords (1981) (Atari).zip', verbose=True)
+            # gi = GameInfo(settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, '26', 'D:/emulation/roms/a2600/Warlords (1981) (Atari).zip', verbose=True)
+            gi = GameInfo(settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, '4', 'D:/emulation/roms/snes/Super Mario World (U).ZIP', verbose=True)
+            # gi = GameInfo(settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, '23', 'D:/emulation/roms/dreamcast/Ikaruga (Japan).zip', verbose=True)
             media = gi.GetAvailableMedia()
         except:
             pass

@@ -1,4 +1,4 @@
-# coding=<utf-8>
+# -*- coding: utf-8 -*-
 # lb2am.py - https://github.com/sharkusk/lb2am
 # Copyright (C) 2017 - Marcus Kellerman
 #
@@ -50,18 +50,26 @@ LB_TO_SS_MEDIA_MAP = {
         'Screenshot - Gameplay':    ["screenshot",],
         'Fanart - Background':      ["fanart",],
         'Video':                    ["video",],
-        'Clear Logo':               ["wheels",],
-        'Box - Front':              ["boxs2",],
-        'Box - 3D':                 ["boxs3",],
+        'Clear Logo':               ["wheel",],
+        'Box - Front':              ["box2d",],
+        'Box - 3D':                 ["box3d",],
         'Box - Back':               ["box2d-back",],
-        'Arcade - Marquee':         ["screenmarquee","marquee",],
-        'Banner':                   ["box2d-side",],
-        'Manual':                   ["manuels", ],
+        'Arcade - Marquee':         ["marquee",],
+        'Banner':                   ["screenmarquee",],
+        'Manual':                   ["manuel", ],
         'Advertisement Flyer - Front': ["flyer",],
         'Cart - Front':             ["support2d",],
         }
 
-SS_LOCALE_PREFERENCE = ['us','wor','eu','jp',]
+ADDITIONAL_MAPPINGS = {
+        'Super Nintendo': ['Super Nintendo Entertainment System',],
+        'Mame': ['MAME', 'Final Burn Alpha',],
+        'NES': ['Nintendo Entertainment System',],
+        'Daphne': ['LaserDisc',],
+        'Gamecube': ['Nintendo GameCube',],
+        }
+
+SS_LOCALE_PREFERENCE = ['us','us1','wor','eu','jp',]
 
 class LaunchBoxScreenScraper(object):
     """ """
@@ -86,19 +94,22 @@ class LaunchBoxScreenScraper(object):
         self.ssLocalePreference = SS_LOCALE_PREFERENCE
 
     def CreateScreenScraperSystemMap(self, ssmapFileName, updateSystems):
-        """ 
+        """
 	Writes the ssmap.py file and returns a system map with entries like this:
         { "Sega Megadrive": "1", ... }
         """
-        syslist = SS.SystemList( self.ssparameters, updateSystems=updateSystems )
-        ssmap = syslist.GetSystemList() 
+        syslist = SS.SystemList( updateCache=updateSystems, **self.ssparameters)
+        ssmap = syslist.GetSystemList()
+        for ssplat in ADDITIONAL_MAPPINGS.keys():
+            for lbplat in ADDITIONAL_MAPPINGS[ssplat]:
+                ssmap[lbplat] = ssmap[ssplat]
         f = open('ssmap.py', 'w')
         f.write(SS_MAP_HEADER)
         for key in ssmap:
-            f.write('%s: %s' % (key, ssmap[key]))
+            f.write('    "%s": "%s",\n' % (key.encode('utf-8'), ssmap[key]))
         f.write('}')
         f.close()
-        return ssmap 
+        return ssmap
 
     def CreateLaunchBoxArtFolderMap( self ):
         """
@@ -131,14 +142,12 @@ class LaunchBoxScreenScraper(object):
         Returns number of items scraped
         """
         mediaCount = 0
-        if self.verbose:
-            print("Scraping: %s" % LbPlatformName)
+        print("\nScraping: %s" % LbPlatformName)
         if SsPlatformId is None:
             try:
                 SsPlatformId = self.ssmap[LbPlatformName]
             except:
-                if self.verbose:
-                    print("  Unable to find ScreenScraperId.")
+                print("  Unable to find ScreenScraperId.")
                 return mediaCount
         platFileName = os.path.join(self.lbPath, 'Data', 'Platforms', LbPlatformName)+'.xml'
         try:
@@ -146,7 +155,7 @@ class LaunchBoxScreenScraper(object):
         except:
             if self.verbose:
                 print("  Unable to open LB platform file: '%s'"% platFileName)
-            return mediaCount 
+            return mediaCount
 
         platArtDirs = self.artDirs[LbPlatformName]
         root = tree.getroot()
@@ -155,6 +164,9 @@ class LaunchBoxScreenScraper(object):
             gamePath = os.path.abspath(os.path.join(self.lbPath,gamePath))
             gameFileName = os.path.splitext(os.path.basename(gamePath))[0]
             gameTitle = game.find("Title").text
+
+            print("  --- %s ---" % gameTitle.encode('utf-8'))
+
             # Search LB media directories for existing artwork
             mediaNeeded = []
             for mediaType in self.lbToSsMediaMap.keys():
@@ -162,7 +174,7 @@ class LaunchBoxScreenScraper(object):
                 ad = platArtDirs[mediaType]
                 if len(find_files(os.path.join(self.lbPath,ad),gameTitle+'*.*')) > 0:
                     foundMedia = True
-                elif len(find_files(os.path.join(self.lbPath,ad),gameFileName+'*.*')) > 0: 
+                elif len(find_files(os.path.join(self.lbPath,ad),gameFileName+'*.*')) > 0:
                     foundMedia = True
                 if foundMedia is False:
                     if self.useGameTitle:
@@ -171,36 +183,47 @@ class LaunchBoxScreenScraper(object):
                         fn = os.path.join(self.lbPath,ad,gameFileName)
                     mediaNeeded.append((mediaType,fn))
                     if self.verbose:
-                        print("  %s is missing a %s" % (gameTitle, mediaType))
+                        print("    Missing a %s" % mediaType)
 
             if len(mediaNeeded) > 0:
                 systemid = self.ssmap[LbPlatformName]
                 try:
-                    ss = SS.GameInfo(systemId=systemid, romPath=gamePath, verbose=self.verbose, **self.ssparameters)
+                    ss = SS.GameInfo(systemId=systemid, romPath=gamePath, gameTitle=gameTitle, verbose=self.verbose, **self.ssparameters)
                 except SS.RomNotFoundError:
-                    if self.verbose:
-                        print("  Not found in ScreenScraper")
+                    print("    Not found in ScreenScraper")
                     continue
                 availableMedia = ss.GetAvailableMedia()
 
                 for mediaToCheck in mediaNeeded:
                     url = None
                     # LB media directory may map to multipe SS types
-                    for ssMedia in self.lbToSsMediaMap[mediaToCheck[0]]:
-                        if ssMedia in availableMedia:
-                            url = availableMedia[ssMedia][0]['url']
+                    for mediaType in self.lbToSsMediaMap[mediaToCheck[0]]:
+                        if mediaType in availableMedia:
+                            locale = availableMedia[mediaType].keys()[0]
+                            if len(availableMedia[mediaType]) > 1:
+                                # Find our preferred locale
+                                for locale in self.ssLocalePreference:
+                                    if locale in availableMedia[mediaType]:
+                                        break
+                                else:
+                                    print("    Did not find a preferred locale from list %s." % availableMedia[mediaType].keys())
+                            url = availableMedia[mediaType][locale]['url']
                             if self.verbose:
-                                print("  Getting %s!" % ssMedia)
-                        # In order of priority, so stop searching if we find what we need
-                        break
+                                print("    Getting %s (%s)!" % (mediaType,locale))
+                            break
                     else:
                         # Didn't find what we needed, so move on to next
                         continue
                     ext = '.'+url.split('&mediaformat=')[1][:3]
-                    if self.verbose:
-                        print("  Saving " % (mediaToCheck[1]+ext))
-                    # TODO: Uncomment and allow downloads to occur
-                    if None:
+                    filename = mediaToCheck[1]+ext 
+                    if os.path.exists(filename) is False:
+                        print("    Saving: %s" % filename.encode('utf-8'))
+                        if not os.path.exists(os.path.dirname(filename)):
+                            try:
+                                os.makedirs(os.path.dirname(filename))
+                            except OSError as exc: # Guard against race condition
+                                if exc.errno != errno.EEXIST:
+                                    raise
                         f = open(mediaToCheck[1]+ext,'wb')
                         response = urllib2.urlopen(url)
                         f.write(response.read())
@@ -213,9 +236,12 @@ class LaunchBoxScreenScraper(object):
 ###############################################################################
 
 def find_files(directory, pattern='*'):
-    return [os.path.join(dirpath, f)
-	for dirpath, dirnames, files in os.walk(directory)
-	for f in fnmatch.filter(files, pattern)]
+    try:
+        return [os.path.join(dirpath, f)
+            for dirpath, dirnames, files in os.walk(directory)
+            for f in fnmatch.filter(files, pattern)]
+    except:
+        return []
 
 ###############################################################################
 # BASIC TESTS
@@ -225,12 +251,18 @@ def main():
     import settings
     test = 2
 
+    verbose = False
+
     # import ipdb; ipdb.set_trace()
-    lbss = LaunchBoxScreenScraper('..\LaunchBox', settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, verbose=True)
+    lbss = LaunchBoxScreenScraper('..\LaunchBox', settings.devid, settings.devpassword, settings.softname, settings.ssid, settings.sspassword, verbose)
 
     if test == 1:
-        lbss.ScrapePlatform("MAME")
-        lbss.ScrapePlatform("Atari 2600")
+        # lbss.ScrapePlatform("Sega Dreamcast")
+        # lbss.ScrapePlatform("MAME")
+        # lbss.ScrapePlatform("Atari 2600")
+        # lbss.ScrapePlatform("Super Nintendo Entertainment System")
+        # lbss.ScrapePlatform("Microsoft MSX2")
+        lbss.ScrapePlatform("Nintendo GameCube")
 
     if test == 2:
         lbss.ScrapeAllPlatforms()
