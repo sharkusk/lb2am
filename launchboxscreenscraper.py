@@ -67,6 +67,7 @@ ADDITIONAL_MAPPINGS = {
         'NES': ['Nintendo Entertainment System',],
         'Daphne': ['LaserDisc',],
         'Gamecube': ['Nintendo GameCube',],
+        'Nintendo 64': ['Nintendo 64-VC',],
         }
 
 SS_LOCALE_PREFERENCE = ['us','us1','wor','eu','jp',]

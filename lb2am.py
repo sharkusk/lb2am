@@ -142,7 +142,7 @@ AM_IMAGES = {
 
 AM_IMAGE_REGIONS = [ "United States", "North America", "Europe", "Japan", ]
 
-def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir, dryrun=False, verbose=False ):
+def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir, RomExt, RocketLauncherBaseDir=None, dryrun=False, verbose=False ):
     tree = ET.parse(os.path.join(LaunchboxBaseDir, 'Data', 'Emulators.xml'))
     root = tree.getroot()
 
@@ -166,8 +166,8 @@ def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir, dryrun=False, verbo
             platformName = emulatorPlatform.find('Platform').text
             print("Creating Emulator: "+platformName)
 
-            if args.rlauncher:
-                appPath = os.path.abspath(args.rlauncher)
+            if RocketLauncherBaseDir:
+                appPath = os.path.abspath(RocketLauncherBaseDir)
                 commandLine = 'args -s "[emulator]" -r "[name]" -p AttractMode -f "%s"' % os.path.join(os.path.abspath(AttractModeBaseDir), 'attract.exe')
                 romPath = ''
             else:
@@ -199,8 +199,6 @@ def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir, dryrun=False, verbo
                     commandLine += '[romfilename]'
                 else:
                     commandLine += '"[romfilename]"'
-            romExt = args.romext
-
             artworkText = ''
             for artPrefix in AM_IMAGES.keys():
                 artworkText += artPrefix
@@ -211,7 +209,7 @@ def CreateAmEmulators( LaunchboxBaseDir, AttractModeBaseDir, dryrun=False, verbo
                         artworkText += os.path.join(os.path.abspath(LaunchboxBaseDir), artDirNames, region)+';'
                 artworkText += '\n'
 
-            output = ATTRACTMODE_EMULATOR_FILE_FORMAT % { "appPath": appPath, "commandLine": commandLine, "romPath": romPath, "romExt": romExt, "platformName": platformName, "artwork": artworkText }
+            output = ATTRACTMODE_EMULATOR_FILE_FORMAT % { "appPath": appPath, "commandLine": commandLine, "romPath": romPath, "romExt": RomExt, "platformName": platformName, "artwork": artworkText }
 
             # Attractmode uses Unix style paths, so replace the windows \'s
             output = output.replace('\\', '/').strip()
@@ -330,7 +328,7 @@ def main():
     if args.genroms:
         CreateRomlists( args.Launchbox_dir, args.AttractMode_dir, args.dryrun, args.verbose )
     if args.genplats:
-        CreateAmEmulators( args.Launchbox_dir, args.AttractMode_dir, args.dryrun, args.verbose )
+        CreateAmEmulators( args.Launchbox_dir, args.AttractMode_dir, args.romext, args.rlauncher, args.dryrun, args.verbose )
     if args.renart:
         RenameLBArtwork( args.Launchbox_dir, args.AttractMode_dir, args.dryrun, args.verbose )
     if args.mergeart:
